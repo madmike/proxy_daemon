@@ -15,8 +15,11 @@ module ProxyDaemon
         command = ''
         Timeout::timeout(6) {
           command = ($stdin.gets || String.new).strip
-          log "empty!!!" if command.empty?
-          raise Timeout::Error if command.empty?
+          
+          if command.empty?
+            log "Got empty answer by daemon, exiting...".yellow
+            raise Timeout::Error
+          end
         }
       rescue Timeout::Error
         answer 'timeout'
@@ -30,6 +33,9 @@ module ProxyDaemon
       begin
         $stdout.puts "#{command}"
         $stdout.flush
+      rescue Errno::EPIPE => e
+        log 'Broken pipe with daemon, exiting...'.yellow
+        Kernel.exit!
       rescue => e
         log e.inspect.red
       end
@@ -67,6 +73,9 @@ module ProxyDaemon
       TypeError, Net::HTTPExceptions, Net::HTTPBadResponse, OpenSSL::SSL::SSLError => e
         log "proxy".red + " in #{'process'.yellow}: #{e.inspect.red}"
         answer 'proxy'
+      rescue Interrupt => e
+        log 'Interrupted by user, exiting...'.yellow
+        Kernel.exit!
       rescue Exception => e
         log "rescue in #{'process'.yellow}: #{e.inspect}, #{e.backtrace.reverse.join.red}"
         answer 'error'
