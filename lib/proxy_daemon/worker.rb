@@ -5,8 +5,6 @@ require 'openssl'
 
 module ProxyDaemon
   class Worker
-    attr_accessor :url
-    
     def initialize
       @client = Net::HTTP.Proxy(nil, nil)
       @url = ''
@@ -19,7 +17,7 @@ module ProxyDaemon
           command = ($stdin.gets || String.new).strip
           
           if command.empty?
-            log "Got empty answer from daemon, exiting...".yellow
+            log "Got empty answer by daemon, exiting...".yellow
             raise Timeout::Error
           end
         }
@@ -69,11 +67,7 @@ module ProxyDaemon
           raise Net::HTTPBadResponse
         end
       
-        res = parse(@page.body)
-        
-        if !!res == res || res.nil?; answer(res ? 'ok' : 'error')
-        elsif res.is_a? Array; answer("set #{res[0]}:#{res[1]}")
-        else; answer('error') end
+        answer(parse(@page.body) ? 'ok' : 'error')
       rescue Timeout::Error, Errno::ETIMEDOUT, Errno::ECONNREFUSED,
       Errno::EINVAL, Errno::ECONNRESET, Errno::ENETUNREACH, SocketError, EOFError,
       TypeError, Net::HTTPExceptions, Net::HTTPBadResponse, OpenSSL::SSL::SSLError => e
@@ -83,7 +77,7 @@ module ProxyDaemon
         log 'Interrupted by user, exiting...'.yellow
         Kernel.exit!
       rescue Exception => e
-        log "rescue in #{'process'.yellow}: #{e.inspect},\n#{e.backtrace.reverse.join("\n").red}"
+        log "rescue in #{'process'.yellow}: #{e.inspect}, #{e.backtrace.reverse.join.red}"
         answer 'error'
       end
     end
@@ -97,14 +91,10 @@ module ProxyDaemon
     end
   
     def parse(body)
-      raise NotImplementedError if @block.nil?
-      
-      @block.call(self, body)
-#      instance_exec body, &@block
+      raise NotImplementedError
     end
 
-    def call(&block)
-      @block = block if block_given?
+    def call
       proxy = nil
 
       loop do
@@ -129,6 +119,7 @@ module ProxyDaemon
       end
     end
   
+  private
     def log(msg)
       $stderr.puts "[child #{Process.pid}]".magenta + " #{msg}"
     end
