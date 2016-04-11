@@ -5,14 +5,17 @@ require 'colorize'
 
 module ProxyDaemon
   class Daemon
+    attr_accessor :list
+    
     def initialize(script, options)
       @script = script
       @proxies = ((options[:proxies].map { |proxy| proxy.gsub /\s+/, ' ' }) || []).shuffle
       @urls = options[:urls] || []
-      @workers = options[:workers] || 10
+      @workers = [(options[:workers] || 10), @urls.count].min # if urls count are less than workers use less workers
       @tries = options[:tries] || 4
     
       @threads = []
+      @list = {}
       @semaphore = Mutex.new
     end
   
@@ -37,6 +40,7 @@ module ProxyDaemon
       elsif answer == 'timeout' || answer == 'error'
         raise "Process: '#{answer}'"
       elsif Thread.current[:command] == :url
+        if (buf = answer.match(/^set (.+?)[\s]*:[\s]*?(.+)$/i)); @list[buf[1]] = buf[2] end
         log "Process: #{Thread.current[:url].cyan}: '#{answer.green}'", pipe
       else
         log "Answer: #{answer}".green, pipe
@@ -45,34 +49,44 @@ module ProxyDaemon
   
     def worker
       IO.popen("#{@script}", 'r+') { |p|
-        proxy = getProxy
-        log "Starting loop with new proxy: ".green + "#{(proxy || 'nil').yellow}", p
-        command :proxy, p, proxy
-      
-        begin
-          loop do
-            sleep(0.1)
-            url = getUrl
-
-            if url.nil?
-              finished "Links are finished! exitting...".green, p
-              command :exit, p
-              break
-            else
-              log 'Urls count: ' + "#{@urls.length}".green + ", #{url.green}"
-              Thread.current[:url] = url
-              command :url, p, url
-              listen p
-            end
+        if (@script == '-' && p.nil?) # child process
+          if @block.nil?
+            $stderr.puts "[#{Process.pid}]".magenta + ' Empty block for parsing content'.red
+            Kernel.exit!
           end
+          
+          worker = ProxyDaemon::Worker.new
+          worker.call(&@block)
+        else
+          proxy = getProxy
+          log "Starting loop with new proxy: ".green + "#{(proxy || 'nil').yellow}", p
+          command :proxy, p, proxy
+      
+          begin
+            loop do
+              sleep(0.1)
+              url = getUrl
+
+              if url.nil?
+                finished "Links are finished! exitting...".green, p
+                command :exit, p
+                break
+              else
+                log 'Urls count: ' + "#{@urls.length}".green + ", #{url.green}"
+                Thread.current[:url] = url
+                command :url, p, url
+                listen p
+              end
+            end
         
-          log "Finishing loop".green, p
-        rescue Exception => e
-          @semaphore.synchronize {
-            log "Exception in main: " + "#{e.message.red}, '#{Thread.current[:url]}'".red, p
-            command :exit, p
-            #puts e.backtrace
-          }
+            log "Finishing loop".green, p
+          rescue Exception => e
+            @semaphore.synchronize {
+              log "Exception in main: " + "#{e.message.red}, '#{Thread.current[:url]}'".red, p
+              command :exit, p
+              #puts e.backtrace
+            }
+          end
         end
       }
     
@@ -83,10 +97,16 @@ module ProxyDaemon
       end
     end
   
-    def start
-      puts "[main] Starting " + "#{@workers}".yellow + " workers:"
-      @workers.times { |i| @threads << Thread.new(&(->{worker})) }
-      @threads.each { |t| t.join }
+    def start(&block)
+      @block = block if block_given?
+      
+      begin
+        puts "[main] Starting " + "#{@workers}".yellow + " workers:"
+        @workers.times { |i| @threads << Thread.new(&(->{worker})) }
+        @threads.each { |t| t.join }
+      rescue Interrupt => e
+        puts "[main] Interrupted by user".yellow
+      end
     end
   
   private
