@@ -77,7 +77,7 @@ module ProxyDaemon
       rescue Timeout::Error, Errno::ETIMEDOUT, Errno::ECONNREFUSED,
       Errno::EINVAL, Errno::ECONNRESET, Errno::ENETUNREACH, SocketError, EOFError,
       TypeError, Net::HTTPExceptions, Net::HTTPBadResponse, OpenSSL::SSL::SSLError => e
-        log "proxy".red + " in #{'process'.yellow}: #{e.inspect.red}"
+        log 'proxy'.red + " in #{'process'.yellow}: #{e.inspect.red}"
         answer 'proxy'
       rescue Interrupt => e
         log 'Interrupted by user, exiting...'.yellow
@@ -114,6 +114,7 @@ module ProxyDaemon
           when /^proxy/
             proxy = task.match(/^proxy\s*(.*)$/)[1]
             changeProxy(proxy)
+            answer('ok')
           when /^url/
             @url = task.match(/^url\s+(.+)$/)[1]
             process(@url)

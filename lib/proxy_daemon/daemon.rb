@@ -33,6 +33,7 @@ module ProxyDaemon
         proxy = getProxy
         log "Choosing new proxy: #{(proxy || 'nil').yellow}", pipe
         command :proxy, pipe, proxy
+        listen pipe, try
         command :url, pipe, Thread.current[:url]
         listen pipe, try+1
       elsif answer.empty?
