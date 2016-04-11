@@ -11,7 +11,7 @@ module ProxyDaemon
       @script = script
       @proxies = ((options[:proxies].map { |proxy| proxy.gsub /\s+/, ' ' }) || []).shuffle
       @urls = options[:urls] || []
-      @workers = [(options[:workers] || 10), @urls.count].min # if urls count are less than workers use less workers
+      @workers = [(options[:workers] || 10), @urls.count].min
       @tries = options[:tries] || 4
     
       @threads = []
