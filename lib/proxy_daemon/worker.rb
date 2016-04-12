@@ -6,18 +6,19 @@ require 'openssl'
 module ProxyDaemon
   class Worker
     attr_accessor :url
-    
+
     def initialize
       @client = Net::HTTP.Proxy(nil, nil)
       @url = ''
     end
-  
+
     def listen
       begin
         command = ''
         Timeout::timeout(6) {
           command = ($stdin.gets || String.new).strip
-          
+          log ('Task: ' + command.to_s.yellow)
+
           if command.empty?
             log "Got empty answer from daemon, exiting...".yellow
             raise Timeout::Error
@@ -27,10 +28,10 @@ module ProxyDaemon
         answer 'timeout'
         Kernel.exit!
       end
-  
+
       command
     end
-  
+
     def answer(command)
       begin
         $stdout.puts "#{command}"
@@ -42,7 +43,7 @@ module ProxyDaemon
         log e.inspect.red
       end
     end
-  
+
     def process(url)
       begin
         uri = URI(url)
@@ -63,20 +64,20 @@ module ProxyDaemon
             @page = http.request(req)
           }
         }
-      
+
         if (!@page.is_a?(Net::HTTPOK) || @page.body.empty?)
           log @page
           raise Net::HTTPBadResponse
         end
-      
+
         res = parse(@page.body)
-        
+
         if !!res == res || res.nil?; answer(res ? 'ok' : 'error')
         elsif res.is_a? Array; answer("set #{res[0]}:#{res[1]}")
         else; answer('error') end
       rescue Timeout::Error, Errno::ETIMEDOUT, Errno::ECONNREFUSED,
       Errno::EINVAL, Errno::ECONNRESET, Errno::ENETUNREACH, SocketError, EOFError,
-      TypeError, Net::HTTPExceptions, Net::HTTPBadResponse, OpenSSL::SSL::SSLError => e
+      TypeError, Zlib::BufError, Net::HTTPExceptions, Net::HTTPBadResponse, OpenSSL::SSL::SSLError => e
         log 'proxy'.red + " in #{'process'.yellow}: #{e.inspect.red}"
         answer 'proxy'
       rescue Interrupt => e
@@ -87,7 +88,7 @@ module ProxyDaemon
         answer 'error'
       end
     end
-  
+
     def changeProxy(proxy)
       if proxy == 'localhost' || proxy.nil? || (proxy = proxy.split(/\s+/)).length < 2
         ENV['http_proxy'] = nil
@@ -95,15 +96,16 @@ module ProxyDaemon
         ENV['http_proxy'] = "http://#{proxy[0]}:#{proxy[1]}"
       end
     end
-  
+
     def parse(body)
       raise NotImplementedError if @block.nil?
-      
+
       @block.call(self, body)
 #      instance_exec body, &@block
     end
 
     def call(&block)
+      $stdout.sync = true
       @block = block if block_given?
       proxy = nil
 
@@ -114,24 +116,22 @@ module ProxyDaemon
           when /^proxy/
             proxy = task.match(/^proxy\s*(.*)$/)[1]
             changeProxy(proxy)
-            answer('ok')
           when /^url/
             @url = task.match(/^url\s+(.+)$/)[1]
             process(@url)
           when /^exit/
             exit!
           end
-
-          #$stderr.puts "[child #{Process.pid}]".magenta + ' Task: ' + task.to_s.yellow
         rescue => e
           log "rescue in #{'call'.yellow}: #{e.inspect.red}"
           answer 'error'
         end
       end
     end
-  
+
     def log(msg)
-      $stderr.puts "[child #{Process.pid}]".magenta + " #{msg}"
+      $stderr.syswrite "[child #{Process.pid}]".magenta + " #{msg}\n"
+      $stderr.flush
     end
   end
 end
