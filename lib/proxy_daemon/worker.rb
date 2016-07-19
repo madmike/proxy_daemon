@@ -7,8 +7,10 @@ module ProxyDaemon
   class Worker
     attr_accessor :url
 
-    def initialize
+    def initialize(parser = nil, parse_method = nil)
       @client = Net::HTTP.Proxy(nil, nil)
+      @parser = parser
+      @parse_method = parse_method
       @url = ''
     end
 
@@ -32,9 +34,12 @@ module ProxyDaemon
       command
     end
 
-    def answer(command)
+    def answer(answer, data = nil)
       begin
-        $stdout.puts "#{command}"
+        pack = {answer: answer}
+        pack[:data] = data if data
+        
+        $stdout.puts pack.to_json
         $stdout.flush
       rescue Errno::EPIPE => e
         log 'Broken pipe with daemon, exiting...'.yellow
@@ -72,9 +77,8 @@ module ProxyDaemon
 
         res = parse(@page.body)
 
-        if !!res == res || res.nil?; answer(res ? 'ok' : 'error')
-        elsif res.is_a? Array; answer("set #{res[0]}:#{res[1]}")
-        else; answer('error') end
+        if !!res === res || res.nil? then answer(res ? 'ok' : 'error')
+        else  answer('ok', res) end
       rescue Timeout::Error, Errno::ETIMEDOUT, Errno::ECONNREFUSED,
       Errno::EINVAL, Errno::ECONNRESET, Errno::ENETUNREACH, SocketError, EOFError,
       TypeError, Zlib::BufError, Net::HTTPExceptions, Net::HTTPBadResponse, OpenSSL::SSL::SSLError => e
@@ -84,7 +88,7 @@ module ProxyDaemon
         log 'Interrupted by user, exiting...'.yellow
         Kernel.exit!
       rescue Exception => e
-        log "rescue in #{'process'.yellow}: #{e.inspect},\n#{e.backtrace.reverse.join("\n").red}"
+        log "rescue in #{'process'.yellow}: #{e.inspect},\n#{e.backtrace.join("\n").red}"
         answer 'error'
       end
     end
@@ -98,9 +102,10 @@ module ProxyDaemon
     end
 
     def parse(body)
-      raise NotImplementedError if @block.nil?
-
-      @block.call(self, body)
+      raise NotImplementedError if @parser.nil? && @block.nil?
+      
+      @block.call(self, body) if @block
+      @parser.send(:"parse_#{@parse_method}", self, body) if @parser
 #      instance_exec body, &@block
     end
 
@@ -111,15 +116,17 @@ module ProxyDaemon
 
       loop do
         begin
-          task = listen
-          case task
-          when /^proxy/
-            proxy = task.match(/^proxy\s*(.*)$/)[1]
+          task = JSON.parse(listen)
+          
+          case task['command']
+          when 'proxy'
+            proxy = task['proxy']
             changeProxy(proxy)
-          when /^url/
-            @url = task.match(/^url\s+(.+)$/)[1]
+            process(@url) unless @url.empty?
+          when 'url'
+            @url = task['url']
             process(@url)
-          when /^exit/
+          when 'exit'
             exit!
           end
         rescue => e
