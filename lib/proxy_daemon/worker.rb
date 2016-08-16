@@ -5,7 +5,7 @@ require 'openssl'
 
 module ProxyDaemon
   class Worker
-    attr_accessor :url
+    attr_accessor :url, :page
 
     def initialize(parser = nil, parse_method = nil)
       @client = Net::HTTP.Proxy(nil, nil)
